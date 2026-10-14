@@ -6,7 +6,7 @@ outputs_dir = "outputs"   # fetched results land here, relative to this file
 requirements = "requirements.txt"   # installed on the remote box before the script runs
 
 [kaggle]
-kernel = "boraginaceae/pinn_experiment-runner"   # notebook the runs are pushed to; the first `agave run --on kaggle` creates it
+kernel = "boraginaceae/pinn-experiment-runner"   # notebook the runs are pushed to; the first `agave run --on kaggle` creates it
 machine_shape = "NvidiaTeslaT4"   # Kaggle's default P100 is not supported by current torch
 token_dataset = "boraginaceae/github-token"   # private dataset holding the GitHub token (API-pushed kernels cannot read Secrets)
 
