@@ -6,7 +6,7 @@ Stops cleanly before BUDGET_S so that Kaggle saves the outputs (a timed-out kern
 import os, sys, json, time, math
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
-from mupinn.train import train
+from mupinn.runner import run_cfg
 
 BUDGET_S = float(os.environ.get("AGAVE_BUDGET_S", 5.0 * 3600))
 OUT = os.path.join(os.environ.get("OUTPUT_DIR", "outputs/local"), "sweep")
@@ -43,9 +43,7 @@ for i, c in enumerate(cfgs):
         print(f"budget reached after {done} runs; stopping at config {i}/{len(cfgs)}", flush=True)
         break
     ts = time.time()
-    kw = dict(c); kw["task_name"] = kw.pop("task")
-    r = train(device=device, want_grad=False, **kw)
-    r["stats"] = {str(k): v for k, v in r["stats"].items()}
+    r = run_cfg(c, device, want_grad=False)
     with open(p, "w") as f:
         json.dump(r, f)
     done += 1

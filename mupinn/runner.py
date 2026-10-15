@@ -19,16 +19,22 @@ def cfg_path(cfg, group):
     return os.path.join(d, cfg_name(cfg) + ".json")
 
 
-def run_one(cfg, group, device, force=False):
-    p = cfg_path(cfg, group)
-    if os.path.exists(p) and not force:
-        return None
-    kw = dict(cfg)
+def run_cfg(cfg, device, **extra):
+    """Train one config with the project defaults filled in; returns the JSON-serializable result."""
+    kw = dict(cfg); kw.update(extra)
     kw.setdefault("depth", 3); kw.setdefault("act", "tanh"); kw.setdefault("N", 512); kw.setdefault("out_init", "default")
     kw.setdefault("steps", 1000); kw.setdefault("seed", 0)
     kw["task_name"] = kw.pop("task")
     r = train(device=device, **kw)
     r["stats"] = {str(k): v for k, v in r["stats"].items()}
+    return r
+
+
+def run_one(cfg, group, device, force=False):
+    p = cfg_path(cfg, group)
+    if os.path.exists(p) and not force:
+        return None
+    r = run_cfg(cfg, device)
     with open(p, "w") as f:
         json.dump(r, f)
     return r
