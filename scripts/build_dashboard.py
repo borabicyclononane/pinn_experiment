@@ -4,9 +4,13 @@ import sys, os, json, math
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mupinn.analysis import aggregate_coord
 
-group = sys.argv[1] if len(sys.argv) > 1 else "coordcheck"
+groups = (sys.argv[1] if len(sys.argv) > 1 else "coordcheck").split(",")   # e.g. coordcheck,coordcheck_lowlr:lowlr,coord_depth1:depth1
 out = sys.argv[2] if len(sys.argv) > 2 else "figs/dashboard.html"
-agg = aggregate_coord(group)
+agg = {}
+for g in groups:
+    name, _, suffix = g.partition(":")
+    for (task, param, opt), d in aggregate_coord(name).items():
+        agg[(task + ("@" + suffix if suffix else ""), param, opt)] = d
 data = {}
 for (task, param, opt), d in agg.items():
     key = f"{task}|{param}|{opt}"
@@ -17,9 +21,7 @@ tasks = sorted({k.split("|")[0] for k in data})
 opts = sorted({k.split("|")[2] for k in data})
 payload = json.dumps({"data": data, "tasks": tasks, "opts": opts}, separators=(",", ":"))
 
-HTML = r"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>μP PINN coordinate checks</title>
+HTML = r"""<title>PINN μP Coordinate Checks</title>
 <meta name="description" content="Interactive coordinate-check dashboard: per-node RMS statistics vs width for regression and PINN losses under SP and μP.">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"></script>
 <style>
@@ -29,7 +31,7 @@ HTML = r"""<!doctype html>
  --sp:#d95926;--mup:#3987e5;--ntk:#199e70;--pos:#e66767;--neg:#3987e5;--mid:#383835}}
 :root[data-theme="dark"]{color-scheme:dark;--bg:#1a1a19;--panel:#222221;--text:#ffffff;--text2:#c3c2b7;--grid:#333331;--border:#3a3a38;
  --sp:#d95926;--mup:#3987e5;--ntk:#199e70;--pos:#e66767;--neg:#3987e5;--mid:#383835}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;padding:16px}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;padding-inline:16px;padding-block:16px;min-width:0}
 h1{font-size:20px;margin:0 0 4px} .sub{color:var(--text2);margin:0 0 12px;font-size:13px}
 .controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel)}
 .controls label{display:flex;gap:6px;align-items:center;color:var(--text2);font-size:13px}
@@ -42,7 +44,7 @@ select,input[type=range]{font:inherit;color:var(--text);background:var(--bg);bor
 .tabs button.on{background:var(--mup);color:#fff;border-color:var(--mup)}
 #heat .card{min-height:320px}
 .note{font-size:12px;color:var(--text2);margin-top:12px}
-</style></head><body>
+</style>
 <h1>Coordinate checks: regression vs physics-informed losses, SP vs μP</h1>
 <p class="sub">RMS of each node of the computation graph against width n, after t full-batch steps (mean ± s.e.m. over 3 seeds; MLP, 3 hidden layers, tanh). A flat line (exponent 0) is what μP predicts for every node; fitted exponents use n ≥ 256.</p>
 <div class="tabs"><button id="tab-width" class="on">RMS vs width</button><button id="tab-exp">Exponent heatmap (node × step)</button><button id="tab-time">RMS vs step (per width)</button></div>
@@ -55,7 +57,7 @@ select,input[type=range]{font:inherit;color:var(--text);background:var(--bg);bor
 </div>
 <div class="legend"><span><i class="sw" style="background:var(--sp)"></i>SP</span><span><i class="sw" style="background:var(--mup)"></i>μP</span><span id="leg2"></span></div>
 <div id="grid" class="grid"></div>
-<p class="note">Reference slopes drawn in grey: n⁰ (flat), n^{±1/2}, n^{±1}. Quantities: value = RMS of the node; delta = RMS of (node − node at init); grad = RMS of ∂loss/∂node; gradf = RMS of ∂(mean f)/∂node; update = RMS of the parameter update applied at this step. Learning rates: SGD 2⁻⁵, Adam 2⁻⁸ at every width (μP multipliers relative to base width 64).</p>
+<p class="note">Reference slopes drawn in grey: n⁰ (flat), n^{±1/2}, n^{±1}. Quantities: value = RMS of the node; delta = RMS of (node − node at init); grad = RMS of ∂loss/∂node; gradf = RMS of ∂(mean f)/∂node; update = RMS of the parameter update applied at this step. Learning rates: SGD 2⁻⁵, Adam 2⁻⁸ at every width (μP multipliers relative to base width 64); tasks tagged @lowlr use SGD 2⁻⁷ and Adam 2⁻¹⁰; tasks tagged @depth1 are one-hidden-layer networks (the mean-field setting) with widths up to 16384.</p>
 <script>
 const P = __PAYLOAD__;
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -114,7 +116,7 @@ $("step").addEventListener("input", ()=>{ $("stepv").textContent=$("step").value
 for (const [id,v] of [["tab-width","width"],["tab-exp","exp"],["tab-time","time"]]) $(id).addEventListener("click", ()=>{ view=v; document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('on')); $(id).classList.add('on'); render(); });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
 render();
-</script></body></html>
+</script>
 """
 open(out, "w").write(HTML.replace("__PAYLOAD__", payload))
 print("wrote", out, f"{os.path.getsize(out)/1e6:.2f} MB", "keys:", len(data))
