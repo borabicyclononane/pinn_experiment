@@ -14,12 +14,14 @@ os.makedirs(OUT, exist_ok=True)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print("device", device, torch.cuda.get_device_name(0) if device == "cuda" else "", flush=True)
 
-PHASES = [("regress1d", [1024, 2048, 4096]), ("ode2", [1024, 2048, 4096]), ("ode1", [1024, 2048, 4096]),
-          ("heat2d", [1024, 2048, 4096]), ("ode4", [1024, 2048])]
+# width-major priority: 4096 first (not run locally), then 2048, then 1024
+PRIORITY = [(4096, "regress1d"), (4096, "ode2"), (4096, "ode1"), (4096, "heat2d"),
+            (2048, "ode4"), (2048, "ode2"), (2048, "heat2d"), (2048, "regress1d"), (2048, "ode1"),
+            (1024, "ode4"), (1024, "ode2"), (1024, "heat2d"), (1024, "regress1d"), (1024, "ode1")]
 LRS = {"sgd": [2.0 ** k for k in range(-11, -1)], "adam": [2.0 ** k for k in range(-12, -3)]}
 cfgs = []
-for task, widths in PHASES:
-    for w in widths:
+for w, task in PRIORITY:
+    if True:
         for opt in ["sgd", "adam"]:
             for param in ["sp", "mup"]:
                 for lr in LRS[opt]:
