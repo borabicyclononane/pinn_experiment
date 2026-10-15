@@ -19,7 +19,21 @@ for (task, param, opt), d in agg.items():
         data[key][nq] = {str(w): {str(t): [round(m, 6) if m == m else None, round(s, 6)] for t, (m, s, n) in dt.items()} for w, dt in dw.items()}
 tasks = sorted({k.split("|")[0] for k in data})
 opts = sorted({k.split("|")[2] for k in data})
-payload = json.dumps({"data": data, "tasks": tasks, "opts": opts}, separators=(",", ":"))
+# learning-rate sweeps (seed geometric mean), from results/sweep*
+import collections, math
+from mupinn.runner import load_group
+sweep_groups = (sys.argv[3] if len(sys.argv) > 3 else "sweep").split(",")
+acc = collections.defaultdict(list)
+for g in sweep_groups:
+    for r in load_group(g):
+        v = r["final_loss"]; bad = r["diverged"] or v is None or not math.isfinite(v) or v > 10
+        acc[(r["task"], r["optimizer"], r["param"], r["width"], r["lr"])].append(None if bad else v)
+sweep = collections.defaultdict(lambda: collections.defaultdict(dict))
+for (task, opt, param, w, lr), vals in acc.items():
+    ok = [x for x in vals if x is not None]
+    gm = math.exp(sum(math.log(max(x, 1e-30)) for x in ok) / len(ok)) if ok else None
+    sweep[f"{task}|{param}|{opt}"][str(w)][str(round(math.log2(lr)))] = [None if gm is None else float(f"{gm:.4g}"), len(vals)]
+payload = json.dumps({"data": data, "tasks": tasks, "opts": opts, "sweep": sweep}, separators=(",", ":"))
 
 HTML = r"""<title>PINN μP Coordinate Checks</title>
 <meta name="description" content="Interactive coordinate-check dashboard: per-node RMS statistics vs width for regression and PINN losses under SP and μP.">
@@ -46,8 +60,8 @@ select,input[type=range]{font:inherit;color:var(--text);background:var(--bg);bor
 .note{font-size:12px;color:var(--text2);margin-top:12px}
 </style>
 <h1>Coordinate checks: regression vs physics-informed losses, SP vs μP</h1>
-<p class="sub">RMS of each node of the computation graph against width n, after t full-batch steps (mean ± s.e.m. over 3 seeds; MLP, 3 hidden layers, tanh). A flat line (exponent 0) is what μP predicts for every node; fitted exponents use n ≥ 256.</p>
-<div class="tabs"><button id="tab-width" class="on">RMS vs width</button><button id="tab-exp">Exponent heatmap (node × step)</button><button id="tab-time">RMS vs step (per width)</button></div>
+<p class="sub">RMS of each node of the computation graph against width n, after t full-batch steps (mean ± s.e.m. over 3 seeds; MLP, 3 hidden layers, tanh). A flat line (exponent 0) is what μP predicts for every node; fitted exponents use n ≥ 256. The learning-rate transfer tab shows the 1000-step training loss against the base learning rate at each width (geometric mean over seeds).</p>
+<div class="tabs"><button id="tab-width" class="on">RMS vs width</button><button id="tab-exp">Exponent heatmap (node × step)</button><button id="tab-time">RMS vs step (per width)</button><button id="tab-lr">Learning-rate transfer</button></div>
 <div class="controls">
  <label>Task <select id="task"></select></label>
  <label>Optimizer <select id="opt"></select></label>
@@ -110,10 +124,27 @@ function renderTime() {
     const lay=layoutBase(`${param==='sp'?'SP':'μP'} ${node} / ${q} (light→dark = narrow→wide)`); lay.yaxis.type='log'; lay.xaxis.title={text:'step t',standoff:4}; lay.showlegend=true; lay.legend={font:{size:9},x:1,xanchor:'right',y:0,yanchor:'bottom',bgcolor:'rgba(0,0,0,0)'};
     Plotly.newPlot(div,traces,lay,{displayModeBar:false,responsive:true}); }
 }
-function render(){ $("steplab").style.display = view==='width'?'flex':'none'; ({width:renderWidth, exp:renderExp, time:renderTime})[view](); }
+function renderLR() {
+  const task=$("task").value.split("@")[0], opt=$("opt").value; const grid=$("grid"); grid.innerHTML="";
+  const ramp=['#cde2fb','#9ec5f4','#6da7ec','#3987e5','#256abf','#1c5cab','#104281','#0d366b'];
+  const best={};
+  for (const param of ["sp","mup"]) { const s=(P.sweep||{})[`${task}|${param}|${opt}`]; if(!s) continue;
+    const card=document.createElement("div"); card.className="card"; const div=document.createElement("div"); card.appendChild(div); grid.appendChild(card);
+    const ws=Object.keys(s).map(Number).sort((a,b)=>a-b); best[param]=[];
+    const traces=ws.map((w,i)=>{ const ks=Object.keys(s[w]).map(Number).sort((a,b)=>a-b); const ys=ks.map(k=>s[w][k][0]);
+      let bi=-1; ys.forEach((y,j)=>{ if(y!=null && (bi<0||y<ys[bi])) bi=j; }); if(bi>=0) best[param].push([w,ks[bi]]);
+      return {x:ks,y:ys,mode:'lines+markers',name:'n='+w,connectgaps:false,line:{color:ramp[Math.round(i*(ramp.length-1)/Math.max(1,ws.length-1))],width:2},marker:{size:5},hovertemplate:`n=${w} lr=2^%{x}: loss %{y:.3g}<extra></extra>`};});
+    const lay=layoutBase(`${param==='sp'?'SP':'μP'}: training loss after 1000 steps vs base learning rate (light→dark = narrow→wide)`); lay.height=330; lay.yaxis.type='log'; lay.yaxis.exponentformat='power'; lay.xaxis.title={text:'log2(base learning rate)',standoff:4}; lay.showlegend=true; lay.legend={font:{size:9},x:1,xanchor:'right',y:1,yanchor:'top',bgcolor:'rgba(0,0,0,0)'};
+    Plotly.newPlot(div,traces,lay,{displayModeBar:false,responsive:true}); }
+  const card=document.createElement("div"); card.className="card"; const div=document.createElement("div"); card.appendChild(div); grid.appendChild(card);
+  const traces=[]; for (const param of ["sp","mup"]) if (best[param]) traces.push({x:best[param].map(b=>b[0]),y:best[param].map(b=>b[1]),mode:'lines+markers',name:param==='sp'?'SP':'μP',line:{color:css(param==='sp'?'--sp':'--mup'),width:2},marker:{size:7},hovertemplate:`${param==='sp'?'SP':'μP'} n=%{x}: best lr 2^%{y}<extra></extra>`});
+  const lay=layoutBase('Best base learning rate vs width (flat = transfer)'); lay.height=330; lay.xaxis.type='log'; lay.xaxis.tickvals=[64,256,1024,4096]; lay.xaxis.title={text:'width n',standoff:4}; lay.yaxis.title={text:'log2(best lr)',standoff:4}; lay.showlegend=true; lay.legend={font:{size:10},x:1,xanchor:'right',y:1,yanchor:'top',bgcolor:'rgba(0,0,0,0)'};
+  Plotly.newPlot(div,traces,lay,{displayModeBar:false,responsive:true});
+}
+function render(){ $("steplab").style.display = view==='width'?'flex':'none'; for (const id of ["q","nodes"]) $(id).parentElement.style.display = view==='lr'?'none':'flex'; ({width:renderWidth, exp:renderExp, time:renderTime, lr:renderLR})[view](); }
 for (const id of ["task","opt","q","nodes"]) $(id).addEventListener("change", render);
 $("step").addEventListener("input", ()=>{ $("stepv").textContent=$("step").value; render(); });
-for (const [id,v] of [["tab-width","width"],["tab-exp","exp"],["tab-time","time"]]) $(id).addEventListener("click", ()=>{ view=v; document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('on')); $(id).classList.add('on'); render(); });
+for (const [id,v] of [["tab-width","width"],["tab-exp","exp"],["tab-time","time"],["tab-lr","lr"]]) $(id).addEventListener("click", ()=>{ view=v; document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('on')); $(id).classList.add('on'); render(); });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
 render();
 </script>

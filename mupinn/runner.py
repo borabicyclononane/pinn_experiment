@@ -8,7 +8,7 @@ RESULTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 
 def cfg_name(cfg):
-    keys = ["task", "width", "depth", "param", "optimizer", "lr", "steps", "seed", "act", "N", "out_init"]
+    keys = ["task", "width", "depth", "param", "optimizer", "lr", "steps", "seed", "act", "N", "out_init"] + (["resample"] if cfg.get("resample") else [])
     s = "_".join(f"{k}={cfg.get(k)}" for k in keys)
     return s
 

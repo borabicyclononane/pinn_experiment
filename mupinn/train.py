@@ -123,12 +123,14 @@ def train(task_name: str, width: int, depth: int, param: str, lr: float, steps: 
           device: str = "cpu", measure_steps=None, want_grad=True,
           base_width: int = 64, out_init: str = "default", data_seed: int = 1234,
           eval_pts: int = 1000, time_limit: float = None, adam_betas=(0.9, 0.999), verbose=False,
-          div_thresh: float = 1e4):
-    """Full-batch training on fixed collocation points."""
+          div_thresh: float = 1e4, resample: bool = False):
+    """Full-batch training on fixed collocation points (resample=True draws fresh points every step; the
+    measured statistics always use the fixed initial batch)."""
     torch.manual_seed(seed)
     task = TASKS[task_name]()
     gen = torch.Generator().manual_seed(data_seed)
     pts = task.points(N, gen, device)
+    gen_train = torch.Generator().manual_seed(data_seed + 7 + seed)
     pts_eval = task.points(eval_pts, torch.Generator().manual_seed(data_seed + 1), device)
     model = MLP(task.d_in, width, depth, param=param, act=act, base_width=base_width, out_init=out_init, seed=seed).to(device)
     opt = model.make_optimizer(lr, optimizer, betas=adam_betas) if optimizer == "adam" else model.make_optimizer(lr, optimizer)
@@ -159,7 +161,7 @@ def train(task_name: str, width: int, depth: int, param: str, lr: float, steps: 
         if t == steps:
             break
         opt.zero_grad(set_to_none=True)
-        total, terms, _ = task.loss(model, pts)
+        total, terms, _ = task.loss(model, task.points(N, gen_train, device) if resample else pts)
         if not math.isfinite(float(total)):
             diverged = True
             break
